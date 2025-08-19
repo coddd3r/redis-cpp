@@ -9,6 +9,17 @@ std::string getBulkString(std::string origStr)
     return retStr;
 }
 
+std::string getRespArray(std::vector<std::string> elems)
+{
+    std::string retStr;
+    retStr.append("*");
+    retStr.append(std::to_string(elems.size()));
+    retStr.append("\r\n");
+    for (auto elem : elems)
+        retStr.append(getBulkString(elem));
+    return retStr;
+}
+
 std::string getRespInt(int i)
 {
 

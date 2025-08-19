@@ -28,27 +28,19 @@
 
 #include "mainDB.hpp"
 
-std::string getRespArray(std::vector<std::string> elems)
-{
-    std::string retStr;
-    retStr.append("*");
-    retStr.append(std::to_string(elems.size()));
-    retStr.append("\r\n");
-    for (auto elem : elems)
-        retStr.append(getBulkString(elem));
-    return retStr;
-}
-
 class ListDB
 {
         std::unordered_map<std::string, std::vector<std::string>> listsMap;
 
     public:
-        int handlePush(std::vector<std::string> singleCommand, int fd)
+        int handlePush(std::vector<std::string> singleCommand, int fd, bool left)
         {
             auto listKey = singleCommand[1];
             for (int i = 2; i < singleCommand.size(); i++)
-                listsMap[listKey].push_back(singleCommand[i]);
+                if (left)
+                    listsMap[listKey].insert(listsMap[listKey].begin(), singleCommand[i]);
+                else
+                    listsMap[listKey].push_back(singleCommand[i]);
             return writeResponse(fd, getRespInt(listsMap[listKey].size()));
         }
 
@@ -258,7 +250,11 @@ int main(int argc, char **argv)
                             break;
 
                         case Rpush:
-                            listDb.handlePush(singleCommand, sd);
+                            listDb.handlePush(singleCommand, sd, false);
+                            break;
+
+                        case Lpush:
+                            listDb.handlePush(singleCommand, sd, true);
                             break;
 
                         case Lrange:
