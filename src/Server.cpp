@@ -1,4 +1,5 @@
 #include <arpa/inet.h>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -17,17 +18,42 @@
 #include <regex>
 
 const uint16_t BUFFER_SIZE = 4096;
-const char PONG_RESPONSE[] = "+PONG\r\n";
-const char RESP_OK[] = "+OK\r\n";
+const std::string PONG_RESPONSE = "+PONG\r\n";
+const std::string RESP_OK = "+OK\r\n";
 
 enum Options
 {
     Command,
     Ping,
-    InvalidCommand
+    InvalidCommand,
+    Echo,
 };
 
-Options resolveOption(std::string input);
+Options resolveOption(std::string);
+std::vector<std::vector<std::string>> getCommand(std::string);
+std::vector<std::vector<std::string>> readCommandsFromRespArray(std::string);
+int writeResponse(int);
+std::string getBulkString(std::string);
+
+std::string getBulkString(std::string origStr)
+{
+    std::string retStr;
+    retStr.append("$");
+    retStr.append(std::to_string(origStr.length()));
+    retStr.append("\r\n");
+    retStr.append(origStr);
+    retStr.append("\r\n");
+    return retStr;
+}
+
+int writeResponse(int fd, std::string buf)
+{
+
+    auto actualBuf = buf.c_str();
+    std::cerr << "actual buff: " << actualBuf << "\n";
+    // return write(fd, actualBuf, buf.length());
+    return write(fd, actualBuf, buf.length());
+}
 
 Options resolveOption(std::string input)
 {
@@ -38,6 +64,8 @@ Options resolveOption(std::string input)
         return Command;
     if (input == "ping")
         return Ping;
+    if (input == "echo")
+        return Echo;
     return InvalidCommand;
 };
 
@@ -96,7 +124,6 @@ std::vector<std::vector<std::string>> readCommandsFromRespArray(std::string resp
 
 // std::string getCommand(std::string redisMessage)
 std::vector<std::vector<std::string>> getCommand(std::string redisMessage)
-
 {
     std::vector<std::vector<std::string>> vecRet;
     switch (redisMessage[0])
@@ -261,13 +288,22 @@ int main(int argc, char **argv)
                         switch (resolveOption(cmd))
                         {
                         case Command:
-                            numWritten = write(sd, &RESP_OK, sizeof(RESP_OK) - 1);
+                            // numWritten = write(sd, &RESP_OK, sizeof(RESP_OK) - 1);
+                            numWritten = writeResponse(sd, RESP_OK);
                             break;
+
                         case Ping:
-                            numWritten = write(sd, &PONG_RESPONSE, sizeof(PONG_RESPONSE) - 1);
+                            // numWritten = write(sd, &PONG_RESPONSE, sizeof(PONG_RESPONSE) - 1);
+                            numWritten = writeResponse(sd, PONG_RESPONSE);
                             break;
+
+                        case Echo:
+                            std::cerr << "Echoing: " << singleCommand[1] << "\n";
+                            numWritten = writeResponse(sd, getBulkString(singleCommand[1]));
+                            break;
+
                         default:
-                            numWritten = write(sd, &RESP_OK, sizeof(RESP_OK) - 1);
+                            numWritten = writeResponse(sd, RESP_OK);
                             break;
                         }
                         std::cerr << "Wrote:" << numWritten << "bytes\n";
