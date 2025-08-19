@@ -44,6 +44,14 @@ class ListDB
             return writeResponse(fd, getRespInt(listsMap[listKey].size()));
         }
 
+        int getListLen(std::string listKey, int fd)
+        {
+
+            if (listsMap.find(listKey) == listsMap.end())
+                return writeResponse(fd, ZERO_INT);
+            return writeResponse(fd, getRespInt(listsMap[listKey].size()));
+        }
+
         int getRange(std::vector<std::string> singleCommand, int fd)
         {
             auto listKey = singleCommand[1];
@@ -259,6 +267,10 @@ int main(int argc, char **argv)
 
                         case Lrange:
                             listDb.getRange(singleCommand, sd);
+                            break;
+
+                        case Llen:
+                            listDb.getListLen(singleCommand[1], sd);
                             break;
 
                         default:

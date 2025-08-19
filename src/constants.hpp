@@ -4,3 +4,4 @@ const std::string RESP_OK = "+OK\r\n";
 const std::string RESP_NULL = "$-1\r\n";
 const std::string MY_CRLF = "\r\n";
 const std::string EMPTY_ARRAY = "*0\r\n";
+const std::string ZERO_INT = ":0\r\n";
