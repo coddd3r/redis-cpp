@@ -72,7 +72,7 @@ class ListDB
             if (stop < 0)
                 stop = 0;
             if (stop > listLen)
-                stop = listLen;
+                stop = listLen - 1;
 
             std::cerr << "using indices: start:" << start << "stop:" << stop << "\n\n\n";
             if (start >= listLen || start > stop)
