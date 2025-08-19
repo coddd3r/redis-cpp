@@ -28,6 +28,17 @@
 
 #include "mainDB.hpp"
 
+std::string getRespArray(std::vector<std::string> elems)
+{
+    std::string retStr;
+    retStr.append("*");
+    retStr.append(std::to_string(elems.size()));
+    retStr.append("\r\n");
+    for (auto elem : elems)
+        retStr.append(getBulkString(elem));
+    return retStr;
+}
+
 class ListDB
 {
         std::unordered_map<std::string, std::vector<std::string>> listsMap;
@@ -39,6 +50,36 @@ class ListDB
             for (int i = 2; i < singleCommand.size(); i++)
                 listsMap[listKey].push_back(singleCommand[i]);
             return writeResponse(fd, getRespInt(listsMap[listKey].size()));
+        }
+
+        int getRange(std::vector<std::string> singleCommand, int fd)
+        {
+            auto listKey = singleCommand[1];
+            if (listsMap.find(listKey) == listsMap.end())
+                return writeResponse(fd, EMPTY_ARRAY);
+
+            auto currList = listsMap[listKey];
+            auto listLen = currList.size();
+            auto start = std::stoi(singleCommand[2]);
+            auto stop = std::stoi(singleCommand[3]);
+            std::cerr << "initial start: " << start << " stop " << stop << "\n";
+            if (start < 0)
+                start = listLen + start;
+            if (stop < 0)
+                stop = listLen + stop;
+            if (start < 0)
+                start = 0;
+            if (stop < 0)
+                stop = 0;
+            if (stop > listLen)
+                stop = listLen;
+
+            std::cerr << "using indices: start:" << start << "stop:" << stop << "\n\n\n";
+            if (start >= listLen || start > stop)
+                return writeResponse(fd, EMPTY_ARRAY);
+
+            auto elems = std::vector<std::string>(currList.begin() + start, currList.begin() + stop + 1);
+            return writeResponse(fd, getRespArray(elems));
         }
 };
 
@@ -218,6 +259,10 @@ int main(int argc, char **argv)
 
                         case Rpush:
                             listDb.handlePush(singleCommand, sd);
+                            break;
+
+                        case Lrange:
+                            listDb.getRange(singleCommand, sd);
                             break;
 
                         default:

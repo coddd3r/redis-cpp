@@ -6,7 +6,8 @@ enum Options
     Echo,
     Set,
     Get,
-    Rpush
+    Rpush,
+    Lrange,
 };
 
 Options resolveOption(std::string);
@@ -27,6 +28,8 @@ Options resolveOption(std::string input)
         return Get;
     if (input == "rpush")
         return Rpush;
+    if (input == "lrange")
+        return Lrange;
     return InvalidCommand;
 };
 
