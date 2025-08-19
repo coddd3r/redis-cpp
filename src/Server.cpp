@@ -31,19 +31,9 @@
 class ListDB
 {
         std::unordered_map<std::string, std::vector<std::string>> listsMap;
+        std::unordered_map<std::string, std::vector<int>> waitingBlocks;
 
     public:
-        int handlePush(std::vector<std::string> singleCommand, int fd, bool left)
-        {
-            auto listKey = singleCommand[1];
-            for (int i = 2; i < singleCommand.size(); i++)
-                if (left)
-                    listsMap[listKey].insert(listsMap[listKey].begin(), singleCommand[i]);
-                else
-                    listsMap[listKey].push_back(singleCommand[i]);
-            return writeResponse(fd, getRespInt(listsMap[listKey].size()));
-        }
-
         int getListLen(std::string listKey, int fd)
         {
 
@@ -60,11 +50,11 @@ class ListDB
             if (listsMap[listKey].size() < 1)
                 return writeResponse(fd, RESP_NULL);
 
-            auto firstElem = std::string(listsMap[listKey][0]);
-
-            auto foundList = &listsMap[listKey];
             if (singleCommand.size() > 2)
             {
+                auto firstElem = std::string(listsMap[listKey][0]);
+                auto foundList = &listsMap[listKey];
+
                 int numToRemove = std::stoi(singleCommand[2]);
                 auto listSize = foundList->size();
                 if (numToRemove > listSize)
@@ -75,9 +65,38 @@ class ListDB
                 foundList->erase(start, end);
                 return writeResponse(fd, getRespArray(poppedElems));
             }
+            // r//eturn popFirst(listKey, fd);
+            return writeResponse(fd, getBulkString(popFirst(listKey, fd)));
+        }
 
+        std::string popFirst(std::string listKey, int fd)
+        {
+            auto firstElem = std::string(listsMap[listKey][0]);
+            auto foundList = &listsMap[listKey];
             foundList->erase(foundList->begin());
-            return writeResponse(fd, getBulkString(firstElem));
+            return firstElem;
+        }
+
+        int handlePush(std::vector<std::string> singleCommand, int fd, bool left)
+        {
+            auto listKey = singleCommand[1];
+            for (int i = 2; i < singleCommand.size(); i++)
+                if (left)
+                    listsMap[listKey].insert(listsMap[listKey].begin(), singleCommand[i]);
+                else
+                    listsMap[listKey].push_back(singleCommand[i]);
+
+            auto res = writeResponse(fd, getRespInt(listsMap[listKey].size()));
+
+            if (waitingBlocks.find(listKey) != waitingBlocks.end())
+            {
+                auto oldVec = waitingBlocks[listKey];
+                auto blockingFd = waitingBlocks[listKey][0];
+                waitingBlocks[listKey] = std::vector(oldVec.begin() + 1, oldVec.end());
+                respondToBlock(blockingFd, listKey);
+            }
+
+            return res;
         }
 
         int getRange(std::vector<std::string> singleCommand, int fd)
@@ -108,6 +127,25 @@ class ListDB
 
             auto elems = std::vector<std::string>(currList.begin() + start, currList.begin() + stop + 1);
             return writeResponse(fd, getRespArray(elems));
+        }
+
+        int handleBlock(std::vector<std::string> singleCommand, int fd)
+        {
+            auto listKey = singleCommand[1];
+            if (listsMap.find(listKey) == listsMap.end() || listsMap[listKey].empty())
+            {
+                waitingBlocks[listKey].push_back(fd);
+                return 0;
+            }
+            return respondToBlock(fd, listKey);
+        }
+
+        int respondToBlock(int fd, std::string listKey)
+        {
+            std::vector<std::string> retVec;
+            retVec.push_back(listKey);
+            retVec.push_back(popFirst(listKey, fd));
+            return writeResponse(fd, getRespArray(retVec));
         }
 };
 
@@ -303,6 +341,10 @@ int main(int argc, char **argv)
 
                         case Lpop:
                             listDb.handleLpop(singleCommand, sd);
+                            break;
+
+                        case Blpop:
+                            listDb.handleBlock(singleCommand, sd);
                             break;
 
                         default:
