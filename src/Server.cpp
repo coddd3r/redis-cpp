@@ -4,12 +4,15 @@
 // #include <cstddef>
 // #include <cstdint>
 // #include <cstdlib>
+// #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <ctime>
 #include <iostream>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <ostream>
+#include <regex>
 #include <string>
 #include <sys/select.h>
 #include <sys/socket.h>
@@ -18,204 +21,26 @@
 #include <unordered_map>
 #include <vector>
 
-#include <regex>
+#include "constants.hpp"
+#include "funcDefs.hpp"
+#include "helperUtils.hpp"
+#include "types.hpp"
 
-const uint16_t BUFFER_SIZE = 4096;
-const std::string PONG_RESPONSE = "+PONG\r\n";
-const std::string RESP_OK = "+OK\r\n";
-const std::string RESP_NULL = "$-1\r\n";
+#include "mainDB.hpp"
 
-enum Options
+class ListDB
 {
-    Command,
-    Ping,
-    InvalidCommand,
-    Echo,
-    Set,
-    Get,
-};
-
-Options resolveOption(std::string);
-Options resolveOption(std::string input)
-{
-    std::transform(input.begin(), input.end(), input.begin(),
-                   [](unsigned char c)
-                   { return std::tolower(c); });
-    if (input == "comand")
-        return Command;
-    if (input == "ping")
-        return Ping;
-    if (input == "echo")
-        return Echo;
-    if (input == "set")
-        return Set;
-    if (input == "get")
-        return Get;
-    return InvalidCommand;
-};
-
-std::vector<std::vector<std::string>> getCommand(std::string);
-std::vector<std::vector<std::string>> readCommandsFromRespArray(std::string);
-int writeResponse(int fd, std::string buf);
-std::string getBulkString(std::string);
-
-struct dbValue
-{
-        std::string val;
-        // time_t expiryTime;
-        std::chrono::system_clock::time_point expiryTime;
-        // std::time_t expiryTime;
-        //   std::chrono::duration<std::chrono::milliseconds> expiryTime;
-        //    unsigned long expiryTime;
-        bool hasExpiry;
-};
-
-class MainDB
-{
-        std::unordered_map<std::string, dbValue> htmap;
+        std::unordered_map<std::string, std::vector<std::string>> listsMap;
 
     public:
-        void set(std::vector<std::string> singleCommand, std::string value)
+        int handlePush(std::vector<std::string> singleCommand, int fd)
         {
-            dbValue newVal;
-
-            newVal.val = value;
-            newVal.hasExpiry = false;
-            if (singleCommand.size() > 4)
-            {
-                auto timeType = singleCommand[3];
-                std::transform(timeType.begin(), timeType.end(), timeType.begin(),
-                               [](unsigned char c)
-                               { return std::tolower(c); });
-                if (timeType == "px")
-                {
-                    newVal.hasExpiry = true;
-                    auto expTime = stoi(singleCommand[4]);
-                    auto msTime = std::chrono::milliseconds(expTime);
-                    auto currTime = std::chrono::system_clock::now();
-                    auto useTime = currTime + msTime;
-                    newVal.expiryTime = useTime;
-                    std::cerr << "\n\nadding expiry of: " << msTime.count()
-                              << "to current time: " << currTime.time_since_epoch().count() << "\n\n"
-                              << " expiry set to " << useTime.time_since_epoch().count() << "\n\n";
-                }
-            }
-            htmap[singleCommand[1]] = newVal;
-        }
-
-        const int get(const std::string key, int fd)
-        {
-            for (const auto &[key, value] : htmap)
-                std::cerr << "IN KV LOOP\n"
-                          << " found key: " << key << "\nval: " << value.val << "\n";
-
-            std::cerr << "map size: " << htmap.size() << "\n";
-
-            if (htmap.find(key) != htmap.end())
-            {
-
-                auto curr_val = htmap[key];
-                std::cerr << "Writing GET val: " << curr_val.val << "\n"
-                          << "val has expiry?: " << curr_val.hasExpiry << "\n"
-                          << "val  expiry?: " << curr_val.expiryTime.time_since_epoch().count() << "\n";
-                auto currTime = std::chrono::system_clock::now();
-                std::cerr << "currTIme" << currTime.time_since_epoch().count() << "\n";
-
-                if (!curr_val.hasExpiry ||
-                    (curr_val.hasExpiry &&
-                     curr_val.expiryTime > currTime))
-                    return writeResponse(fd, getBulkString(curr_val.val));
-            }
-            std::cerr << "Failed GET for: " << key << "\n";
-            writeResponse(fd, RESP_NULL);
-            return 0;
+            auto listKey = singleCommand[1];
+            for (int i = 2; i < singleCommand.size(); i++)
+                listsMap[listKey].push_back(singleCommand[i]);
+            return writeResponse(fd, getRespInt(listsMap[listKey].size()));
         }
 };
-
-std::string getBulkString(std::string origStr)
-{
-    std::string retStr;
-    retStr.append("$");
-    retStr.append(std::to_string(origStr.length()));
-    retStr.append("\r\n");
-    retStr.append(origStr);
-    retStr.append("\r\n");
-    return retStr;
-}
-
-int writeResponse(int fd, std::string buf)
-{
-
-    auto actualBuf = buf.c_str();
-    std::cerr << "Writing to stream buff: " << actualBuf << "\n";
-    return write(fd, actualBuf, buf.length());
-}
-
-struct clientConnection
-{
-        int32_t server_fd;
-
-        clientConnection(void)
-        {
-            this->server_fd = -1;
-        }
-};
-
-std::vector<std::vector<std::string>> readCommandsFromRespArray(std::string respArr)
-{
-    int sizeStart = 1;
-    int sizeEnd;
-
-    std::vector<std::vector<std::string>> retVec;
-
-    std::regex rgx("(\r\n)+");
-    std::sregex_token_iterator iter(respArr.begin(),
-                                    respArr.end(),
-                                    rgx,
-                                    -1);
-    std::sregex_token_iterator end;
-    for (; iter != end; ++iter)
-    {
-        std::string curr_s = (std::string)*iter;
-        if (curr_s[0] == '*')
-        {
-            std::cerr << "got size line:" << curr_s << "\n";
-            int arr_size = std::stoi(curr_s.substr(1, curr_s.length()));
-            std::cerr << "got SIZE:" << arr_size << "\n";
-            std::vector<std::string> single_command;
-            // int comm_end = iter + arr_size;
-            iter++;
-            for (; iter != end; ++iter)
-            {
-                curr_s = (std::string)*iter;
-                std::cerr << "in second for, curr_s:" << curr_s << "\n";
-
-                if (curr_s[0] == '*')
-                    break;
-                if (curr_s[0] == '$')
-                    continue;
-
-                std::cerr << "got str line:" << curr_s << "\n";
-                single_command.push_back(curr_s);
-            }
-            retVec.push_back(single_command);
-        }
-    }
-    return retVec;
-}
-
-// std::string getCommand(std::string redisMessage)
-std::vector<std::vector<std::string>> getCommand(std::string redisMessage)
-{
-    std::vector<std::vector<std::string>> vecRet;
-    switch (redisMessage[0])
-    {
-    case '*':
-        return readCommandsFromRespArray(redisMessage);
-    default:
-        return vecRet;
-    }
-}
 
 int main(int argc, char **argv)
 {
@@ -272,6 +97,7 @@ int main(int argc, char **argv)
 
     std::vector<int> clientList;
     MainDB mainDb;
+    ListDB listDb;
 
     while (true)
     {
@@ -301,8 +127,6 @@ int main(int argc, char **argv)
              select(int nfds, fd_set *restrict readfds, fd_set *restrict writefds,
              fd_set *restrict errorfds, struct timeval *restrict timeout);
         */
-
-        // TODO: Specify write fds
 
         std::cerr << "before checking activity, maxfd:" << maxfd << "\n";
         activity = select(maxfd + 1, &readfds, NULL, NULL, NULL);
@@ -390,6 +214,10 @@ int main(int argc, char **argv)
 
                         case Get:
                             mainDb.get(singleCommand[1], sd);
+                            break;
+
+                        case Rpush:
+                            listDb.handlePush(singleCommand, sd);
                             break;
 
                         default:
