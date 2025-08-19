@@ -13,6 +13,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <unordered_map>
 #include <vector>
 
 #include <regex>
@@ -20,6 +21,7 @@
 const uint16_t BUFFER_SIZE = 4096;
 const std::string PONG_RESPONSE = "+PONG\r\n";
 const std::string RESP_OK = "+OK\r\n";
+const std::string RESP_NULL = "$-1\r\n";
 
 enum Options
 {
@@ -27,13 +29,73 @@ enum Options
     Ping,
     InvalidCommand,
     Echo,
+    Set,
+    Get,
 };
 
 Options resolveOption(std::string);
+Options resolveOption(std::string input)
+{
+    std::transform(input.begin(), input.end(), input.begin(),
+                   [](unsigned char c)
+                   { return std::tolower(c); });
+    if (input == "comand")
+        return Command;
+    if (input == "ping")
+        return Ping;
+    if (input == "echo")
+        return Echo;
+    if (input == "set")
+        return Set;
+    if (input == "get")
+        return Get;
+    return InvalidCommand;
+};
+
 std::vector<std::vector<std::string>> getCommand(std::string);
 std::vector<std::vector<std::string>> readCommandsFromRespArray(std::string);
-int writeResponse(int);
+int writeResponse(int fd, std::string buf);
 std::string getBulkString(std::string);
+// void handleSet(std::vector<std::string>, std::unordered_map<std::string, std::string>);
+// int handleGet(std::string, std::unordered_map<std::string, std::string>, int);
+
+// void handleSet(std::vector<std::string> singleCommand, std::unordered_map<std::string, std::string> redisDb)
+//{
+//     auto key = singleCommand[1];
+//     auto val = singleCommand[2];
+//     redisDb[key] = val;
+// }
+
+class MainDB
+{
+        std::unordered_map<std::string, std::string> htmap;
+
+    public:
+        void set(std::string key, std::string value)
+        {
+            htmap[key] = value;
+        }
+
+        const int get(const std::string key, int fd)
+        {
+            for (const auto &[key, value] : htmap)
+            {
+                std::cerr << "IN KV LOOP\n";
+                std::cerr << " found key: " << key << "\nval: " << value << "\n";
+            }
+            auto res = htmap.find(key);
+            std::cerr << "map size: " << htmap.size() << "\n";
+            if (res != htmap.end())
+            {
+                auto val = htmap[key];
+                std::cerr << "Writing GET val: " << val << "\n";
+                return writeResponse(fd, getBulkString(val));
+            }
+            std::cerr << "Failed GET for: " << key << "\n";
+            writeResponse(fd, RESP_NULL);
+            return 0;
+        }
+};
 
 std::string getBulkString(std::string origStr)
 {
@@ -50,24 +112,9 @@ int writeResponse(int fd, std::string buf)
 {
 
     auto actualBuf = buf.c_str();
-    std::cerr << "actual buff: " << actualBuf << "\n";
-    // return write(fd, actualBuf, buf.length());
+    std::cerr << "Writing to stream buff: " << actualBuf << "\n";
     return write(fd, actualBuf, buf.length());
 }
-
-Options resolveOption(std::string input)
-{
-    std::transform(input.begin(), input.end(), input.begin(),
-                   [](unsigned char c)
-                   { return std::tolower(c); });
-    if (input == "comand")
-        return Command;
-    if (input == "ping")
-        return Ping;
-    if (input == "echo")
-        return Echo;
-    return InvalidCommand;
-};
 
 struct clientConnection
 {
@@ -97,23 +144,23 @@ std::vector<std::vector<std::string>> readCommandsFromRespArray(std::string resp
         std::string curr_s = (std::string)*iter;
         if (curr_s[0] == '*')
         {
-            std::cout << "got size line:" << curr_s << "\n";
+            std::cerr << "got size line:" << curr_s << "\n";
             int arr_size = std::stoi(curr_s.substr(1, curr_s.length()));
-            std::cout << "got SIZE:" << arr_size << "\n";
+            std::cerr << "got SIZE:" << arr_size << "\n";
             std::vector<std::string> single_command;
             // int comm_end = iter + arr_size;
             iter++;
             for (; iter != end; ++iter)
             {
                 curr_s = (std::string)*iter;
-                std::cout << "in second for, curr_s:" << curr_s << "\n";
+                std::cerr << "in second for, curr_s:" << curr_s << "\n";
 
                 if (curr_s[0] == '*')
                     break;
                 if (curr_s[0] == '$')
                     continue;
 
-                std::cout << "got str line:" << curr_s << "\n";
+                std::cerr << "got str line:" << curr_s << "\n";
                 single_command.push_back(curr_s);
             }
             retVec.push_back(single_command);
@@ -137,8 +184,8 @@ std::vector<std::vector<std::string>> getCommand(std::string redisMessage)
 
 int main(int argc, char **argv)
 {
-    // Flush after every std::cout / std::cerr
-    std::cout << std::unitbuf;
+    // Flush after every std::cerr / std::cerr
+    std::cerr << std::unitbuf;
     std::cerr << std::unitbuf;
 
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -180,7 +227,7 @@ int main(int argc, char **argv)
 
     struct sockaddr_in client_addr;
     int client_addr_len = sizeof(client_addr);
-    std::cout << "Waiting for a client to connect...\n";
+    std::cerr << "Waiting for a client to connect...\n";
 
     fd_set readfds;
     size_t numBytesRead;
@@ -189,10 +236,11 @@ int main(int argc, char **argv)
     int activity;
 
     std::vector<int> clientList;
+    MainDB mainDb;
 
     while (true)
     {
-        std::cout << "waiting for activity, serverfd is:" << server_fd << "\n";
+        std::cerr << "waiting for activity, serverfd is:" << server_fd << "\n";
         // zero out fd set and add server to set
         FD_ZERO(&readfds);
         FD_SET(server_fd, &readfds);
@@ -221,7 +269,7 @@ int main(int argc, char **argv)
 
         // TODO: Specify write fds
 
-        std::cout << "before checking activity, maxfd:" << maxfd << "\n";
+        std::cerr << "before checking activity, maxfd:" << maxfd << "\n";
         activity = select(maxfd + 1, &readfds, NULL, NULL, NULL);
 
         if (activity < 0)
@@ -230,28 +278,28 @@ int main(int argc, char **argv)
             continue;
         }
 
-        std::cout << "got activity: " << activity << "\n";
+        std::cerr << "got activity: " << activity << "\n";
 
         if (FD_ISSET(server_fd, &readfds))
         {
             int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, (socklen_t *)&client_addr_len);
-            std::cout << "got client: " << client_fd << "\n";
+            std::cerr << "got client: " << client_fd << "\n";
             if (client_fd < 0)
             {
                 std::cerr << "accept error\n";
                 continue;
             }
-            std::cout << "Client connected at socket fd:" << client_fd << "\n"
+            std::cerr << "Client connected at socket fd:" << client_fd << "\n"
                       << "at ip: " << inet_ntoa(server_addr.sin_addr)
                       << ", port: " << ntohs(server_addr.sin_port) << "\n";
 
             clientList.push_back(client_fd);
         }
 
-        std::cout << "After client if fds:[ ";
+        std::cerr << "After client if fds:[ ";
         for (auto e : clientList)
-            std::cout << e << ", " << "\n";
-        std::cout << "]\n";
+            std::cerr << e << ", " << "\n";
+        std::cerr << "]\n";
 
         char buf[BUFFER_SIZE] = {0};
 
@@ -266,15 +314,15 @@ int main(int argc, char **argv)
                 numBytesRead = read(sd, buf, 1024);
                 if (numBytesRead == 0)
                 {
-                    std::cout << "client disconnected\n";
-                    std::cout << "host disconnected, ip: " << inet_ntoa(server_addr.sin_addr)
+                    std::cerr << "client disconnected\n";
+                    std::cerr << "host disconnected, ip: " << inet_ntoa(server_addr.sin_addr)
                               << ", port: " << ntohs(server_addr.sin_port) << "\n";
                     close(sd);
                     clientList.erase(clientList.begin() + i);
                 }
                 else
                 {
-                    std::cout << "message from client: " << buf << "\n";
+                    std::cerr << "message from client: " << buf << "\n";
                     std::string clientMessage = std::string(buf);
 
                     auto all_commands = getCommand(clientMessage);
@@ -284,22 +332,29 @@ int main(int argc, char **argv)
                     {
 
                         auto cmd = singleCommand[0];
-                        std::cout << "Command: " << cmd << "\n";
+                        std::cerr << "Command: " << cmd << "\n";
                         switch (resolveOption(cmd))
                         {
                         case Command:
-                            // numWritten = write(sd, &RESP_OK, sizeof(RESP_OK) - 1);
                             numWritten = writeResponse(sd, RESP_OK);
                             break;
 
                         case Ping:
-                            // numWritten = write(sd, &PONG_RESPONSE, sizeof(PONG_RESPONSE) - 1);
                             numWritten = writeResponse(sd, PONG_RESPONSE);
                             break;
 
                         case Echo:
                             std::cerr << "Echoing: " << singleCommand[1] << "\n";
                             numWritten = writeResponse(sd, getBulkString(singleCommand[1]));
+                            break;
+
+                        case Set:
+                            mainDb.set(singleCommand[1], singleCommand[2]);
+                            numWritten = writeResponse(sd, RESP_OK);
+                            break;
+
+                        case Get:
+                            mainDb.get(singleCommand[1], sd);
                             break;
 
                         default:
