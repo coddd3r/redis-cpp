@@ -52,6 +52,34 @@ class ListDB
             return writeResponse(fd, getRespInt(listsMap[listKey].size()));
         }
 
+        int handleLpop(std::vector<std::string> singleCommand, int fd)
+        {
+            auto listKey = singleCommand[1];
+            if (listsMap.find(listKey) == listsMap.end())
+                return writeResponse(fd, RESP_NULL);
+            if (listsMap[listKey].size() < 1)
+                return writeResponse(fd, RESP_NULL);
+
+            auto firstElem = std::string(listsMap[listKey][0]);
+
+            auto foundList = &listsMap[listKey];
+            if (singleCommand.size() > 2)
+            {
+                int numToRemove = std::stoi(singleCommand[2]);
+                auto listSize = foundList->size();
+                if (numToRemove > listSize)
+                    numToRemove = listSize;
+                auto start = foundList->begin();
+                auto end = foundList->begin() + numToRemove;
+                std::vector<std::string> poppedElems = std::vector<std::string>(start, end);
+                foundList->erase(start, end);
+                return writeResponse(fd, getRespArray(poppedElems));
+            }
+
+            foundList->erase(foundList->begin());
+            return writeResponse(fd, getBulkString(firstElem));
+        }
+
         int getRange(std::vector<std::string> singleCommand, int fd)
         {
             auto listKey = singleCommand[1];
@@ -271,6 +299,10 @@ int main(int argc, char **argv)
 
                         case Llen:
                             listDb.getListLen(singleCommand[1], sd);
+                            break;
+
+                        case Lpop:
+                            listDb.handleLpop(singleCommand, sd);
                             break;
 
                         default:

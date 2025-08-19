@@ -10,6 +10,7 @@ enum Options
     Lrange,
     Lpush,
     Llen,
+    Lpop,
 };
 
 Options resolveOption(std::string);
@@ -36,6 +37,8 @@ Options resolveOption(std::string input)
         return Lpush;
     if (input == "llen")
         return Llen;
+    if (input == "lpop")
+        return Lpop;
     return InvalidCommand;
 };
 
