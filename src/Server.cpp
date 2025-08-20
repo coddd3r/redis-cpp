@@ -153,7 +153,8 @@ class ListDB
         int handleBlock(std::vector<std::string> singleCommand, int fd)
         {
             auto listKey = singleCommand[1];
-            auto expTime = stoi(singleCommand[2]);
+            auto passedTime = stof(singleCommand[2]);
+            auto expTime = int(passedTime * 1000);
             auto msTime = std::chrono::milliseconds(expTime);
             auto currTime = std::chrono::system_clock::now();
             auto useTime = currTime + msTime;
