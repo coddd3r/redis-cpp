@@ -70,14 +70,14 @@ std::vector<std::vector<std::string>> readCommandsFromRespArray(std::string resp
         {
             std::cerr << "got size line:" << curr_s << "\n";
             int arr_size = std::stoi(curr_s.substr(1, curr_s.length()));
-            std::cerr << "got SIZE:" << arr_size << "\n";
+            // std::cerr << "got SIZE:" << arr_size << "\n";
             std::vector<std::string> single_command;
             // int comm_end = iter + arr_size;
             iter++;
             for (; iter != end; ++iter)
             {
                 curr_s = (std::string)*iter;
-                std::cerr << "in second for, curr_s:" << curr_s << "\n";
+                // std::cerr << "in second for, curr_s:" << curr_s << "\n";
 
                 if (curr_s[0] == '*')
                     break;

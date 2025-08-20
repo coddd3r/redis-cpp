@@ -172,6 +172,7 @@ class ListDB
             {
                 std::thread waitForVal([this, listKey, fd, useTime, msTime]()
                                        { this->timedBlock(fd, listKey, useTime, msTime); });
+                waitForVal.detach();
             }
             return 0;
         }
@@ -188,12 +189,15 @@ class ListDB
         {
             while (1)
             {
-                auto hunMs = std::chrono::milliseconds(100);
-                auto sleepTime = (msTime / 5) < hunMs ? msTime / 5 : hunMs;
+                auto maxWait = std::chrono::milliseconds(100);
+                auto fifthOfTime = msTime / 5;
+                auto sleepTime = fifthOfTime < maxWait ? fifthOfTime : maxWait;
                 std::this_thread::sleep_for(sleepTime);
-                if (listsMap.find(listKey) != listsMap.end() && listsMap[listKey].size() > 1)
+                // std::cerr << "sleeping for:" << sleepTime.count() << "\n";
+
+                if (listsMap.find(listKey) != listsMap.end() && listsMap[listKey].size() > 0)
                 {
-                    writeResponse(fd, getBulkString(popFirst(listKey)));
+                    respondToBlock(fd, listKey);
                     return;
                 }
                 auto currTime = std::chrono::system_clock::now();
@@ -210,7 +214,7 @@ int main(int argc, char **argv)
 {
     // Flush after every std::cerr / std::cerr
     std::cerr << std::unitbuf;
-    std::cerr << std::unitbuf;
+    std::cout << std::unitbuf;
 
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd < 0)
