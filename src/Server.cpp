@@ -8,7 +8,9 @@
 #include <cstddef>
 #include <cstring>
 #include <ctime>
+#include <exception>
 #include <iostream>
+#include <mutex>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <ostream>
@@ -17,6 +19,7 @@
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <thread>
 #include <unistd.h>
 #include <unordered_map>
 #include <vector>
@@ -32,45 +35,54 @@ class ListDB
 {
         std::unordered_map<std::string, std::vector<std::string>> listsMap;
         std::unordered_map<std::string, std::vector<int>> waitingBlocks;
+        // std::lock_guard<std::mutex> listLock;
+        std::mutex listLock;
 
     public:
         int getListLen(std::string listKey, int fd)
         {
-
-            if (listsMap.find(listKey) == listsMap.end())
-                return writeResponse(fd, ZERO_INT);
-            return writeResponse(fd, getRespInt(listsMap[listKey].size()));
+            auto listLen = 0;
+            {
+                std::lock_guard<std::mutex> lenLock(listLock);
+                if (listsMap.find(listKey) != listsMap.end())
+                    listLen = listsMap[listKey].size();
+            }
+            return writeResponse(fd, getRespInt(listLen));
         }
 
         int handleLpop(std::vector<std::string> singleCommand, int fd)
         {
             auto listKey = singleCommand[1];
-            if (listsMap.find(listKey) == listsMap.end())
-                return writeResponse(fd, RESP_NULL);
-            if (listsMap[listKey].size() < 1)
-                return writeResponse(fd, RESP_NULL);
+            {
+                std::lock_guard<std::mutex> xLock(listLock);
+                if (listsMap.find(listKey) == listsMap.end() || listsMap[listKey].size() < 1)
+                    return writeResponse(fd, RESP_NULL);
+            }
 
             if (singleCommand.size() > 2)
             {
-                auto firstElem = std::string(listsMap[listKey][0]);
-                auto foundList = &listsMap[listKey];
+                std::vector<std::string> poppedElems;
+                {
+                    std::lock_guard<std::mutex> lpopLock(listLock);
+                    auto foundList = &listsMap[listKey];
 
-                int numToRemove = std::stoi(singleCommand[2]);
-                auto listSize = foundList->size();
-                if (numToRemove > listSize)
-                    numToRemove = listSize;
-                auto start = foundList->begin();
-                auto end = foundList->begin() + numToRemove;
-                std::vector<std::string> poppedElems = std::vector<std::string>(start, end);
-                foundList->erase(start, end);
+                    int numToRemove = std::stoi(singleCommand[2]);
+                    auto listSize = foundList->size();
+                    if (numToRemove > listSize)
+                        numToRemove = listSize;
+                    auto start = foundList->begin();
+                    auto end = foundList->begin() + numToRemove;
+                    poppedElems = std::vector<std::string>(start, end);
+                    foundList->erase(start, end);
+                }
                 return writeResponse(fd, getRespArray(poppedElems));
             }
-            // r//eturn popFirst(listKey, fd);
-            return writeResponse(fd, getBulkString(popFirst(listKey, fd)));
+            return writeResponse(fd, getBulkString(popFirst(listKey)));
         }
 
-        std::string popFirst(std::string listKey, int fd)
+        std::string popFirst(std::string listKey)
         {
+            std::lock_guard<std::mutex> popLock(listLock);
             auto firstElem = std::string(listsMap[listKey][0]);
             auto foundList = &listsMap[listKey];
             foundList->erase(foundList->begin());
@@ -79,33 +91,42 @@ class ListDB
 
         int handlePush(std::vector<std::string> singleCommand, int fd, bool left)
         {
+            auto listSize = 0;
             auto listKey = singleCommand[1];
-            for (int i = 2; i < singleCommand.size(); i++)
-                if (left)
-                    listsMap[listKey].insert(listsMap[listKey].begin(), singleCommand[i]);
-                else
-                    listsMap[listKey].push_back(singleCommand[i]);
+            {
+                std::lock_guard<std::mutex> pushLock(listLock);
+                for (int i = 2; i < singleCommand.size(); i++)
+                    if (left)
+                        listsMap[listKey].insert(listsMap[listKey].begin(), singleCommand[i]);
+                    else
+                        listsMap[listKey].push_back(singleCommand[i]);
 
-            auto res = writeResponse(fd, getRespInt(listsMap[listKey].size()));
+                listSize = listsMap[listKey].size();
+            }
 
             if (waitingBlocks.find(listKey) != waitingBlocks.end())
             {
                 auto oldVec = waitingBlocks[listKey];
                 auto blockingFd = waitingBlocks[listKey][0];
+                // remove the first one responded to
                 waitingBlocks[listKey] = std::vector(oldVec.begin() + 1, oldVec.end());
                 respondToBlock(blockingFd, listKey);
             }
 
-            return res;
+            return writeResponse(fd, getRespInt(listSize));
         }
 
         int getRange(std::vector<std::string> singleCommand, int fd)
         {
             auto listKey = singleCommand[1];
-            if (listsMap.find(listKey) == listsMap.end())
-                return writeResponse(fd, EMPTY_ARRAY);
+            std::vector<std::string> currList;
+            {
+                std::lock_guard<std::mutex> rangeLock(listLock);
+                if (listsMap.find(listKey) == listsMap.end())
+                    return writeResponse(fd, EMPTY_ARRAY);
 
-            auto currList = listsMap[listKey];
+                currList = listsMap[listKey];
+            }
             auto listLen = currList.size();
             auto start = std::stoi(singleCommand[2]);
             auto stop = std::stoi(singleCommand[3]);
@@ -132,20 +153,56 @@ class ListDB
         int handleBlock(std::vector<std::string> singleCommand, int fd)
         {
             auto listKey = singleCommand[1];
-            if (listsMap.find(listKey) == listsMap.end() || listsMap[listKey].empty())
+            auto expTime = stoi(singleCommand[2]);
+            auto msTime = std::chrono::milliseconds(expTime);
+            auto currTime = std::chrono::system_clock::now();
+            auto useTime = currTime + msTime;
+
+            if (expTime == 0)
             {
-                waitingBlocks[listKey].push_back(fd);
-                return 0;
+                if (listsMap.find(listKey) == listsMap.end() || listsMap[listKey].empty())
+                {
+                    waitingBlocks[listKey].push_back(fd);
+                    return 0;
+                }
+                return respondToBlock(fd, listKey);
             }
-            return respondToBlock(fd, listKey);
+
+            if (expTime > 0)
+            {
+                std::thread waitForVal([this, listKey, fd, useTime, msTime]()
+                                       { this->timedBlock(fd, listKey, useTime, msTime); });
+            }
+            return 0;
         }
 
         int respondToBlock(int fd, std::string listKey)
         {
             std::vector<std::string> retVec;
             retVec.push_back(listKey);
-            retVec.push_back(popFirst(listKey, fd));
+            retVec.push_back(popFirst(listKey));
             return writeResponse(fd, getRespArray(retVec));
+        }
+
+        void timedBlock(int fd, std::string listKey, std::chrono::system_clock::time_point expiryTime, std::chrono::milliseconds msTime)
+        {
+            while (1)
+            {
+                auto hunMs = std::chrono::milliseconds(100);
+                auto sleepTime = (msTime / 5) < hunMs ? msTime / 5 : hunMs;
+                std::this_thread::sleep_for(sleepTime);
+                if (listsMap.find(listKey) != listsMap.end() && listsMap[listKey].size() > 1)
+                {
+                    writeResponse(fd, getBulkString(popFirst(listKey)));
+                    return;
+                }
+                auto currTime = std::chrono::system_clock::now();
+                if (currTime > expiryTime)
+                {
+                    writeResponse(fd, RESP_NULL);
+                    return;
+                }
+            }
         }
 };
 
