@@ -1,3 +1,6 @@
+#include <iostream>
+#include <string>
+#include <vector>
 class MainDB
 {
         std::unordered_map<std::string, dbValue> htmap;
@@ -57,5 +60,16 @@ class MainDB
             std::cerr << "Failed GET for: " << key << "\n";
             writeResponse(fd, RESP_NULL);
             return 0;
+        }
+
+        int getType(std::vector<std::string> singleCommand, int fd)
+        {
+            if (singleCommand.size() > 1)
+            {
+                auto key = singleCommand[1];
+                if (htmap.find(key) != htmap.end())
+                    return writeResponse(fd, STRING_TYPE);
+            }
+            return writeResponse(fd, NONE_TYPE);
         }
 };

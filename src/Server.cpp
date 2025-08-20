@@ -409,6 +409,10 @@ int main(int argc, char **argv)
                             listDb.handleBlock(singleCommand, sd);
                             break;
 
+                        case Type:
+                            mainDb.getType(singleCommand, sd);
+                            break;
+
                         default:
                             numWritten = writeResponse(sd, RESP_OK);
                             break;

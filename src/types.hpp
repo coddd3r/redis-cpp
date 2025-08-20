@@ -12,6 +12,7 @@ enum Options
     Llen,
     Lpop,
     Blpop,
+    Type,
 };
 
 Options resolveOption(std::string);
@@ -42,6 +43,8 @@ Options resolveOption(std::string input)
         return Lpop;
     if (input == "blpop")
         return Blpop;
+    if (input == "type")
+        return Type;
     return InvalidCommand;
 };
 
