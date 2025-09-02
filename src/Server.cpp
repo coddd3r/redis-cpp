@@ -1,7 +1,14 @@
 #include "Server.hpp"
 #include "constants.hpp"
+#include "helperUtils.hpp"
+#include "listDB.hpp"
+#include "mainDB.hpp"
+#include "redisTrie.hpp"
+
 #include <algorithm>
 #include <iostream>
+#include <string>
+#include <unordered_map>
 
 int main(int argc, char **argv)
 {
@@ -59,6 +66,7 @@ int main(int argc, char **argv)
     std::vector<int> clientList;
     MainDB mainDb;
     ListDB listDb;
+    std::unordered_map<std::string, RedisStreamRadix> streamsDB;
 
     while (true)
     {
@@ -205,6 +213,9 @@ int main(int argc, char **argv)
                             mainDb.getType(singleCommand, sd);
                             break;
 
+                        case Xadd:
+                            break;
+
                         default:
                             numWritten = writeResponse(sd, RESP_OK);
                             break;
@@ -250,5 +261,7 @@ Options resolveOption(std::string input)
         return Blpop;
     if (input == "type")
         return Type;
+    if (input == "xadd")
+        return Xadd;
     return InvalidCommand;
 };

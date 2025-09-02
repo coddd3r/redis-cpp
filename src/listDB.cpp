@@ -116,6 +116,8 @@ int ListDB::getRange(std::vector<std::string> singleCommand, int fd)
     return writeResponse(fd, getRespArray(elems));
 }
 
+// TODO: HANDLE BLOCKS USING CONDITIONAL VARIABLE
+
 int ListDB::handleBlock(std::vector<std::string> singleCommand, int fd)
 {
     auto listKey = singleCommand[1];

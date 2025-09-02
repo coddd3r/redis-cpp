@@ -27,6 +27,7 @@ enum Options
     Lpop,
     Blpop,
     Type,
+    Xadd,
 };
 
 Options resolveOption(std::string);
@@ -41,7 +42,4 @@ struct clientConnection
         }
 };
 
-#include "helperUtils.hpp"
-#include "listDB.hpp"
-#include "mainDB.hpp"
 #endif
